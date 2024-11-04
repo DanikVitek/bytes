@@ -780,7 +780,8 @@ impl BytesMut {
         self.ptr = vptr(v.as_mut_ptr());
         self.cap = v.capacity();
         debug_assert_eq!(self.len, v.len());
-        return true;
+
+        true
     }
 
     /// Attempts to cheaply reclaim already allocated capacity for at least `additional` more
@@ -986,7 +987,7 @@ impl BytesMut {
         // new start and updating the `len` field to reflect the new length
         // of the view.
         self.ptr = vptr(self.ptr.as_ptr().add(count));
-        self.len = self.len.checked_sub(count).unwrap_or(0);
+        self.len = self.len.saturating_sub(count);
         self.cap -= count;
     }
 
@@ -1280,8 +1281,9 @@ impl PartialEq for BytesMut {
 }
 
 impl PartialOrd for BytesMut {
+    #[inline]
     fn partial_cmp(&self, other: &BytesMut) -> Option<cmp::Ordering> {
-        self.as_slice().partial_cmp(other.as_slice())
+        Some(self.cmp(other))
     }
 }
 
@@ -1492,60 +1494,6 @@ fn original_capacity_from_repr(repr: usize) -> usize {
     1 << (repr + (MIN_ORIGINAL_CAPACITY_WIDTH - 1))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_original_capacity_to_repr() {
-        assert_eq!(original_capacity_to_repr(0), 0);
-
-        let max_width = 32;
-
-        for width in 1..(max_width + 1) {
-            let cap = 1 << width - 1;
-
-            let expected = if width < MIN_ORIGINAL_CAPACITY_WIDTH {
-                0
-            } else if width < MAX_ORIGINAL_CAPACITY_WIDTH {
-                width - MIN_ORIGINAL_CAPACITY_WIDTH
-            } else {
-                MAX_ORIGINAL_CAPACITY_WIDTH - MIN_ORIGINAL_CAPACITY_WIDTH
-            };
-
-            assert_eq!(original_capacity_to_repr(cap), expected);
-
-            if width > 1 {
-                assert_eq!(original_capacity_to_repr(cap + 1), expected);
-            }
-
-            //  MIN_ORIGINAL_CAPACITY_WIDTH must be bigger than 7 to pass tests below
-            if width == MIN_ORIGINAL_CAPACITY_WIDTH + 1 {
-                assert_eq!(original_capacity_to_repr(cap - 24), expected - 1);
-                assert_eq!(original_capacity_to_repr(cap + 76), expected);
-            } else if width == MIN_ORIGINAL_CAPACITY_WIDTH + 2 {
-                assert_eq!(original_capacity_to_repr(cap - 1), expected - 1);
-                assert_eq!(original_capacity_to_repr(cap - 48), expected - 1);
-            }
-        }
-    }
-
-    #[test]
-    fn test_original_capacity_from_repr() {
-        assert_eq!(0, original_capacity_from_repr(0));
-
-        let min_cap = 1 << MIN_ORIGINAL_CAPACITY_WIDTH;
-
-        assert_eq!(min_cap, original_capacity_from_repr(1));
-        assert_eq!(min_cap * 2, original_capacity_from_repr(2));
-        assert_eq!(min_cap * 4, original_capacity_from_repr(3));
-        assert_eq!(min_cap * 8, original_capacity_from_repr(4));
-        assert_eq!(min_cap * 16, original_capacity_from_repr(5));
-        assert_eq!(min_cap * 32, original_capacity_from_repr(6));
-        assert_eq!(min_cap * 64, original_capacity_from_repr(7));
-    }
-}
-
 unsafe impl Send for BytesMut {}
 unsafe impl Sync for BytesMut {}
 
@@ -1716,7 +1664,7 @@ impl From<BytesMut> for Vec<u8> {
                 rebuild_vec(bytes.ptr.as_ptr(), bytes.len, bytes.cap, off)
             }
         } else {
-            let shared = bytes.data as *mut Shared;
+            let shared = bytes.data;
 
             if unsafe { (*shared).is_unique() } {
                 let vec = mem::replace(unsafe { &mut (*shared).vec }, Vec::new());
@@ -1881,6 +1829,90 @@ fn _split_off_must_use() {}
 /// }
 /// ```
 fn _split_must_use() {}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::ToOwned;
+
+    use super::*;
+
+    #[test]
+    fn test_original_capacity_to_repr() {
+        assert_eq!(original_capacity_to_repr(0), 0);
+
+        let max_width = 32;
+
+        for width in 1..(max_width + 1) {
+            let cap = 1 << width - 1;
+
+            let expected = if width < MIN_ORIGINAL_CAPACITY_WIDTH {
+                0
+            } else if width < MAX_ORIGINAL_CAPACITY_WIDTH {
+                width - MIN_ORIGINAL_CAPACITY_WIDTH
+            } else {
+                MAX_ORIGINAL_CAPACITY_WIDTH - MIN_ORIGINAL_CAPACITY_WIDTH
+            };
+
+            assert_eq!(original_capacity_to_repr(cap), expected);
+
+            if width > 1 {
+                assert_eq!(original_capacity_to_repr(cap + 1), expected);
+            }
+
+            //  MIN_ORIGINAL_CAPACITY_WIDTH must be bigger than 7 to pass tests below
+            if width == MIN_ORIGINAL_CAPACITY_WIDTH + 1 {
+                assert_eq!(original_capacity_to_repr(cap - 24), expected - 1);
+                assert_eq!(original_capacity_to_repr(cap + 76), expected);
+            } else if width == MIN_ORIGINAL_CAPACITY_WIDTH + 2 {
+                assert_eq!(original_capacity_to_repr(cap - 1), expected - 1);
+                assert_eq!(original_capacity_to_repr(cap - 48), expected - 1);
+            }
+        }
+    }
+
+    #[test]
+    fn test_original_capacity_from_repr() {
+        assert_eq!(0, original_capacity_from_repr(0));
+
+        let min_cap = 1 << MIN_ORIGINAL_CAPACITY_WIDTH;
+
+        assert_eq!(min_cap, original_capacity_from_repr(1));
+        assert_eq!(min_cap * 2, original_capacity_from_repr(2));
+        assert_eq!(min_cap * 4, original_capacity_from_repr(3));
+        assert_eq!(min_cap * 8, original_capacity_from_repr(4));
+        assert_eq!(min_cap * 16, original_capacity_from_repr(5));
+        assert_eq!(min_cap * 32, original_capacity_from_repr(6));
+        assert_eq!(min_cap * 64, original_capacity_from_repr(7));
+    }
+
+    #[test]
+    fn test_partial_eq() {
+        let a = BytesMut::from(&b"hello"[..]);
+        let b = "hello";
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+
+        let b = &b"hello"[..];
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+
+        let b = "hello".to_owned();
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+
+        let b = b"hello"[..].to_owned();
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+    }
+}
 
 // fuzz tests
 #[cfg(all(test, loom))]

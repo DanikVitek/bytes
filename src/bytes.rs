@@ -789,8 +789,9 @@ impl PartialEq for Bytes {
 }
 
 impl PartialOrd for Bytes {
+    #[inline]
     fn partial_cmp(&self, other: &Bytes) -> Option<cmp::Ordering> {
-        self.as_slice().partial_cmp(other.as_slice())
+        Some(self.cmp(other))
     }
 }
 
@@ -1641,6 +1642,41 @@ fn _split_to_must_use() {}
 /// }
 /// ```
 fn _split_off_must_use() {}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::ToOwned;
+
+    use super::*;
+
+    #[test]
+    fn test_partial_eq() {
+        let a = Bytes::from(&b"hello"[..]);
+        let b = "hello";
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+
+        let b = &b"hello"[..];
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+
+        let b = "hello".to_owned();
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+
+        let b = b"hello"[..].to_owned();
+        assert!(a == b);
+        assert_eq!(a, b);
+        assert!(b == a);
+        assert_eq!(b, a);
+    }
+}
 
 // fuzz tests
 #[cfg(all(test, loom))]

@@ -205,6 +205,29 @@ impl UninitSlice {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// Returns true if the slice has a length of 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bytes::BufMut;
+    ///
+    /// let mut data = [0, 1, 2];
+    /// let mut slice = &mut data[..];
+    /// let chunk = BufMut::chunk_mut(&mut slice);
+    ///
+    /// assert!(!chunk.is_empty());
+    /// 
+    /// slice = &mut data[..0];
+    /// let chunk = BufMut::chunk_mut(&mut slice);
+    ///
+    /// assert!(chunk.is_empty());
+    /// ```
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl fmt::Debug for UninitSlice {
